@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Text.Json;
 
 namespace Rinha;
 
@@ -13,10 +14,10 @@ public class PaymentProcessorApi
 
     public PaymentProcessorApi(string baseUrl)
     {
-        _httpClient.BaseAddress = new Uri(baseUrl);
-        _httpClient.Timeout = TimeSpan.FromMilliseconds(1400);
-        _healthCheckHttpClient.BaseAddress = new Uri(baseUrl);
-        _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(5);
+        _httpClient.BaseAddress = new(baseUrl);
+        _httpClient.Timeout = TimeSpan.FromMilliseconds(20);
+        _healthCheckHttpClient.BaseAddress = new(baseUrl);
+        _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(6);
     }
 
     private static readonly PaymentApiServiceHealthResponse UnhealthyResponse = new(true, 0);
@@ -37,26 +38,47 @@ public class PaymentProcessorApi
                     SerializeOptions
                 ) ?? UnhealthyResponse;
         }
-        catch (Exception e)
+        catch (Exception)
         {
             return UnhealthyResponse;
         }
     }
 
-    public async Task<bool> PostAsync(PaymentApiRequest paymentApiRequest)
+    public async Task<(bool Success, bool isTimeout)> PostAsync(PaymentApiRequest paymentApiRequest)
     {
         try
         {
             var response = await _httpClient.PostAsJsonAsync("payments", paymentApiRequest);
-            return response.IsSuccessStatusCode;
+            var success = response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.UnprocessableEntity;
+            return (success, false);
         }
         catch (HttpRequestException)
         {
-            return false; // If the request fails, we assume the payment processor is down
+            return (false, false);
         }
         catch (OperationCanceledException)
         {
-            return false; // If the request is canceled, we assume the payment processor is down
+            return (false, true);
+        }
+    }
+
+    public async Task<bool> PostIfNotExistAsync(PaymentApiRequest paymentApiRequest)
+    {
+        try
+        {
+            var checkResponse = await _httpClient.GetAsync($"payments/{paymentApiRequest.CorrelationId}");
+            if (checkResponse.IsSuccessStatusCode)
+                return true;
+            var response = await _httpClient.PostAsJsonAsync("payments", paymentApiRequest);
+            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.UnprocessableEntity;
+        }
+        catch (HttpRequestException)
+        {
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 }

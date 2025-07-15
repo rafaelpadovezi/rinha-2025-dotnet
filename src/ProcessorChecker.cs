@@ -6,7 +6,7 @@ public class ProcessorChecker : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ProcessorChecker> _logger;
-    private const int MaxResponseTimeAllowed = 500; // in milliseconds
+    private const int MaxResponseTimeAllowed = 100; // in milliseconds
 
     public ProcessorChecker(IServiceProvider serviceProvider, ILogger<ProcessorChecker> logger)
     {
@@ -19,7 +19,7 @@ public class ProcessorChecker : BackgroundService
         _logger.LogInformation("Timed Hosted Service running.");
 
         // When the timer should have no due-time, then do the work once now.
-        await ChooseBestProcessor();
+        await ChooseBestProcessorAsync();
 
         using PeriodicTimer timer = new(TimeSpan.FromSeconds(5));
 
@@ -29,7 +29,7 @@ public class ProcessorChecker : BackgroundService
             {
                 try
                 {
-                    await ChooseBestProcessor();
+                    await ChooseBestProcessorAsync();
                 }
                 catch (Exception e)
                 {
@@ -43,7 +43,7 @@ public class ProcessorChecker : BackgroundService
         }
     }
 
-    private async Task ChooseBestProcessor()
+    private async Task ChooseBestProcessorAsync()
     {
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IDatabase>();
