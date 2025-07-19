@@ -7,6 +7,7 @@ public class PaymentProcessorApi
 {
     private readonly HttpClient _httpClient = new();
     private readonly HttpClient _healthCheckHttpClient = new();
+
     private static readonly JsonSerializerOptions SerializeOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -15,7 +16,7 @@ public class PaymentProcessorApi
     public PaymentProcessorApi(string baseUrl)
     {
         _httpClient.BaseAddress = new(baseUrl);
-        _httpClient.Timeout = TimeSpan.FromMilliseconds(20);
+        _httpClient.Timeout = TimeSpan.FromMilliseconds(6);
         _healthCheckHttpClient.BaseAddress = new(baseUrl);
         _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(6);
     }
@@ -44,41 +45,71 @@ public class PaymentProcessorApi
         }
     }
 
-    public async Task<(bool Success, bool isTimeout)> PostAsync(PaymentApiRequest paymentApiRequest)
+    public async Task<PaymentResult> PostAsync(
+        PaymentApiRequest paymentApiRequest,
+        CancellationToken cancellationToken = default
+    )
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("payments", paymentApiRequest);
-            var success = response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.UnprocessableEntity;
-            return (success, false);
+            var response = await _httpClient.PostAsJsonAsync(
+                "payments",
+                paymentApiRequest,
+                cancellationToken
+            );
+            if (response.IsSuccessStatusCode)
+            {
+                return PaymentResult.Success;
+            }
+
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            {
+                return PaymentResult.Duplicate;
+            }
+
+            if (response.StatusCode == HttpStatusCode.InternalServerError)
+            {
+                return PaymentResult.Failure;
+            }
+
+            return PaymentResult.Other;
         }
         catch (HttpRequestException)
         {
-            return (false, false);
+            return PaymentResult.Other;
         }
         catch (OperationCanceledException)
         {
-            return (false, true);
+            return PaymentResult.Timeout;
         }
     }
 
-    public async Task<bool> PostIfNotExistAsync(PaymentApiRequest paymentApiRequest)
-    {
-        try
-        {
-            var checkResponse = await _httpClient.GetAsync($"payments/{paymentApiRequest.CorrelationId}");
-            if (checkResponse.IsSuccessStatusCode)
-                return true;
-            var response = await _httpClient.PostAsJsonAsync("payments", paymentApiRequest);
-            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.UnprocessableEntity;
-        }
-        catch (HttpRequestException)
-        {
-            return false;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-    }
+    // public async Task<PaymentResult> PostIfNotExistAsync(PaymentApiRequest paymentApiRequest)
+    // {
+    //     try
+    //     {
+    //         var checkResponse = await _httpClient.GetAsync($"payments/{paymentApiRequest.CorrelationId}");
+    //         if (checkResponse.IsSuccessStatusCode)
+    //             return true;
+    //         var response = await _httpClient.PostAsJsonAsync("payments", paymentApiRequest);
+    //         return response.IsSuccessStatusCode;
+    //     }
+    //     catch (HttpRequestException)
+    //     {
+    //         return false;
+    //     }
+    //     catch (OperationCanceledException)
+    //     {
+    //         return false;
+    //     }
+    // }
+}
+
+public enum PaymentResult
+{
+    Success,
+    Timeout,
+    Failure,
+    Duplicate,
+    Other,
 }

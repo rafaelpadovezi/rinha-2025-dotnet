@@ -1,5 +1,4 @@
 using System.Text.Json;
-
 using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Mvc;
 using Rinha;
@@ -43,16 +42,22 @@ var fallbackBaseUrl =
     ?? throw new InvalidOperationException("PaymentProcessorFallback:BaseUrl is not configured.");
 var fallbackPaymentProcessor = new PaymentProcessorApi(fallbackBaseUrl);
 builder.Services.AddKeyedSingleton("fallback", fallbackPaymentProcessor);
+builder.Services.AddScoped<PaymentService>();
 
 if (builder.Configuration.GetValue<bool?>("RunBackgroundService") ?? false)
 {
     builder.Services.AddHostedService<ProcessorChecker>();
     builder.Services.AddHostedService<PendingPaymentsHandler>();
+    builder.Services.AddHostedService<PendingDefaultPaymentsHandler>();
+    builder.Services.AddHostedService<PendingFallbackPaymentsHandler>();
 }
 
 var app = builder.Build();
 
-await db.KeyDeleteAsync("payments");
+await db.KeyDeleteAsync("fallbackPayments");
+await db.KeyDeleteAsync("defaultPayments");
+await db.KeyDeleteAsync("pendingDefaultPayments");
+await db.KeyDeleteAsync("pendingFallbackPayments");
 await db.KeyDeleteAsync("pendingPayments");
 
 // Configure the HTTP request pipeline.
@@ -67,92 +72,68 @@ app.MapGet(
     {
         var startScore = from.ToUnixTimeSeconds();
         var endScore = to.ToUnixTimeSeconds();
-        var results = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
-        var payments = results.Select(json => JsonSerializer.Deserialize<PaymentEvent>(json!)).ToList();
-        var defaultSummary = payments
-            .Where(p => p.Processor == "default")
-            .GroupBy(p => p.Processor)
-            .Select(g => new Summary(g.Count(), g.Sum(p => p.Amount)))
-            .FirstOrDefault() ?? new Summary(0, 0);
-        var fallbackSummary = payments
-            .Where(p => p.Processor == "fallback")
-            .GroupBy(p => p.Processor)
-            .Select(g => new Summary(g.Count(), g.Sum(p => p.Amount)))
-            .FirstOrDefault() ?? new Summary(0, 0);
-        return Results.Ok(
-            new PaymentSummaryResponse(
-                defaultSummary,
-                fallbackSummary
-            )
+        var batch = db.CreateBatch();
+        var defaultPaymentsTask = batch.SortedSetRangeByScoreAsync(
+            "defaultPayments",
+            startScore,
+            endScore
         );
+        var fallbackPaymentsTask = batch.SortedSetRangeByScoreAsync(
+            "fallbackPayments",
+            startScore,
+            endScore
+        );
+        batch.Execute();
+
+        var defaultPaymentsJson = await defaultPaymentsTask;
+        var fallbackPaymentsJson = await fallbackPaymentsTask;
+        var defaultPayments = defaultPaymentsJson
+            .Select(json => JsonSerializer.Deserialize<PaymentEvent>(json!))
+            .ToArray();
+        var defaultSummary = new Summary(
+            defaultPayments.Length,
+            defaultPayments.Sum(p => p.Amount)
+        );
+        var fallbackPayments = fallbackPaymentsJson
+            .Select(json => JsonSerializer.Deserialize<PaymentEvent>(json!))
+            .ToArray();
+        var fallbackSummary = new Summary(
+            fallbackPayments.Length,
+            fallbackPayments.Sum(p => p.Amount)
+        );
+
+        return Results.Ok(new PaymentSummaryResponse(defaultSummary, fallbackSummary));
     }
 );
 
 app.MapPost(
     "/payments",
-    async ([FromBody] PaymentRequest request) =>
+    async ([FromBody] PaymentRequest request, PaymentService paymentService) =>
     {
-        var payment = new PaymentApiRequest(request.CorrelationId, request.Amount, DateTimeOffset.UtcNow);
+        var payment = new PaymentApiRequest(
+            request.CorrelationId,
+            request.Amount,
+            DateTimeOffset.UtcNow
+        );
 
+        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
         var bestProcessor = await db.StringGetAsync("best-processor");
         if (bestProcessor == "default")
         {
-            var (success, isTimeout) = await defaultPaymentProcessor.PostAsync(payment);
-            if (success || isTimeout)
-            {
-                await SavePaymentAsync(payment, "default");
-                return Results.Ok("Payment processed by default processor.");
-            }
-            await db.StringSetAsync("best-processor", "none");
-            await SavePendingPaymentAsync(payment, "default");
-
-            app.Logger.LogWarning(
-                "Default payment processor failed for correlation ID {CorrelationId}",
-                payment.CorrelationId
-            );
+            await paymentService.SendDefaultPaymentsAsync(payment, cts.Token);
+            return Results.Ok();
         }
 
         if (bestProcessor == "fallback")
         {
-            var (success, isTimeout) = await fallbackPaymentProcessor.PostAsync(payment);
-            if (success || isTimeout)
-            {
-                await SavePaymentAsync(payment, "fallback");
-                return Results.Ok("Payment processed by fallback processor.");
-            }
-            await db.StringSetAsync("best-processor", "none");
-            var procesor = isTimeout ? "none" : "fallback";
-            await SavePendingPaymentAsync(payment, procesor);
-            
-            app.Logger.LogWarning(
-                "Default payment processor failed for correlation ID {CorrelationId}",
-                payment.CorrelationId
-            );
+            await paymentService.SendFallbackPaymentsAsync(payment, cts.Token);
+            return Results.Ok();
         }
 
+        // await db.SavePendingPaymentAsync(payment, "none");
+
         return Results.InternalServerError();
-        // await SavePendingPaymentAsync(payment, "none");
-        //
-        // return Results.Ok("Payment is pending, will be processed later.");
     }
 );
 
 app.Run();
-return;
-
-async Task SavePaymentAsync(PaymentApiRequest paymentApiRequest, string processor)
-{
-    var json = JsonSerializer.Serialize(new PaymentEvent(
-        paymentApiRequest.CorrelationId, paymentApiRequest.Amount, paymentApiRequest.RequestedAt, processor, "success"
-    ));
-    var timestamp = paymentApiRequest.RequestedAt.ToUnixTimeSeconds();
-    await db.SortedSetAddAsync("payments", json, timestamp);
-}
-
-async Task SavePendingPaymentAsync(PaymentApiRequest paymentApiRequest, string processor)
-{
-    var json = JsonSerializer.Serialize(new PaymentEvent(
-        paymentApiRequest.CorrelationId, paymentApiRequest.Amount, paymentApiRequest.RequestedAt, processor, "pending"
-    ));
-    await db.ListRightPushAsync("pendingPayments", json);
-}

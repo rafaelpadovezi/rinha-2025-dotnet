@@ -3,14 +3,14 @@ using StackExchange.Redis;
 
 namespace Rinha;
 
-public class PendingPaymentsHandler : BackgroundService
+public class PendingDefaultPaymentsHandler : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<PendingPaymentsHandler> _logger;
+    private readonly ILogger<PendingDefaultPaymentsHandler> _logger;
 
-    public PendingPaymentsHandler(
+    public PendingDefaultPaymentsHandler(
         IServiceProvider serviceProvider,
-        ILogger<PendingPaymentsHandler> logger
+        ILogger<PendingDefaultPaymentsHandler> logger
     )
     {
         _serviceProvider = serviceProvider;
@@ -26,9 +26,8 @@ public class PendingPaymentsHandler : BackgroundService
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IDatabase>();
             var paymentService = scope.ServiceProvider.GetRequiredService<PaymentService>();
-
             var pendingPayments = await db.ListLeftPopAsync(
-                "pendingPayments",
+                "pendingDefaultPayments",
                 maxConcurrentRequests
             );
             if (pendingPayments is null || pendingPayments.Length == 0)
@@ -50,21 +49,7 @@ public class PendingPaymentsHandler : BackgroundService
                         pendingPayment.RequestedAt
                     );
 
-                    var bestProcessor = await db.StringGetAsync("best-processor");
-                    if (bestProcessor == "default")
-                    {
-                        await paymentService.SendDefaultPaymentsAsync(payment);
-                    }
-
-                    if (bestProcessor == "fallback")
-                    {
-                        await paymentService.SendFallbackPaymentsAsync(payment);
-                    }
-
-                    if (bestProcessor == "none")
-                    {
-                        await db.SavePendingPaymentAsync(payment, "none");
-                    }
+                    await paymentService.SendDefaultPaymentsAsync(payment);
                 };
                 tasks.Add(task);
             }
