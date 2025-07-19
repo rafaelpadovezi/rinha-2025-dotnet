@@ -56,7 +56,7 @@ public class PaymentService(
             return;
         }
 
-        // await db.StringSetAsync("best-processor", "none");
+        await db.StringSetAsync("best-processor", "none");
         var processorToRetry = result == PaymentResult.Timeout ? processor : "none";
         await db.SavePendingPaymentAsync(payment, processorToRetry);
         logger.LogWarning(

@@ -33,7 +33,7 @@ public class PendingPaymentsHandler : BackgroundService
             );
             if (pendingPayments is null || pendingPayments.Length == 0)
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(10), stoppingToken); // Wait for the next iteration
+                await Task.Delay(TimeSpan.FromMilliseconds(100), stoppingToken); // Wait for the next iteration
                 continue;
             }
             var tasks = new List<Func<Task>>();

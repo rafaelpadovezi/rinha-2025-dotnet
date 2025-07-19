@@ -52,6 +52,8 @@ if (builder.Configuration.GetValue<bool?>("RunBackgroundService") ?? false)
     builder.Services.AddHostedService<PendingFallbackPaymentsHandler>();
 }
 
+var requestTimeout = builder.Configuration.GetValue<int?>("RequestTimeout") ?? 15;
+
 var app = builder.Build();
 
 await db.KeyDeleteAsync("fallbackPayments");
@@ -116,7 +118,7 @@ app.MapPost(
             DateTimeOffset.UtcNow
         );
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(requestTimeout));
         var bestProcessor = await db.StringGetAsync("best-processor");
         if (bestProcessor == "default")
         {
@@ -130,9 +132,9 @@ app.MapPost(
             return Results.Ok();
         }
 
-        // await db.SavePendingPaymentAsync(payment, "none");
+        await db.SavePendingPaymentAsync(payment, "none");
 
-        return Results.InternalServerError();
+        return Results.Ok();
     }
 );
 

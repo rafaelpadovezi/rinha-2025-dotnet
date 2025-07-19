@@ -13,6 +13,11 @@
     networks:
       - backend
       - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.8"
+          memory: "150MB"
   
   api2:
     <<: *api1
@@ -28,6 +33,11 @@
     networks:
       - backend
       - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "150MB"
 
   redis:
     image: redis
@@ -41,6 +51,11 @@
       start_period: 20s
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: "30MB"
   
   nginx:
     image: nginx
@@ -56,7 +71,7 @@
     deploy:
       resources:
         limits:
-          cpus: "0.16"
+          cpus: "0.10"
           memory: "20MB"
 
 networks:
