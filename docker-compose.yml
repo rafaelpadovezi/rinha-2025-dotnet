@@ -36,25 +36,6 @@
         limits:
           cpus: "0.5"
           memory: "100MB"
-          
-  worker:
-    build: ./src
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      ConnectionStrings__Redis: redis:6379
-      PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
-      PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
-      Worker: "true"
-    networks:
-      - backend
-      - payment-processor
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: "0.75"
-#          memory: "150MB"
 
   redis:
     image: redis

@@ -36,7 +36,7 @@ public class PaymentProcessorApi
             var content = await response.Content.ReadAsStringAsync();
             return JsonSerializer.Deserialize<PaymentApiServiceHealthResponse>(
                     content,
-                    SerializeOptions
+                    AppJsonSerializerContext.Default.PaymentApiServiceHealthResponse
                 ) ?? UnhealthyResponse;
         }
         catch (Exception)
@@ -55,6 +55,7 @@ public class PaymentProcessorApi
             var response = await _httpClient.PostAsJsonAsync(
                 "payments",
                 paymentApiRequest,
+                AppJsonSerializerContext.Default.PaymentApiRequest,
                 cancellationToken
             );
             if (response.IsSuccessStatusCode)
@@ -62,17 +63,12 @@ public class PaymentProcessorApi
                 return PaymentResult.Success;
             }
 
-            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            return response.StatusCode switch
             {
-                return PaymentResult.Duplicate;
-            }
-
-            if (response.StatusCode == HttpStatusCode.InternalServerError)
-            {
-                return PaymentResult.Failure;
-            }
-
-            return PaymentResult.Other;
+                HttpStatusCode.UnprocessableEntity => PaymentResult.Duplicate,
+                HttpStatusCode.InternalServerError => PaymentResult.Failure,
+                _ => PaymentResult.Other,
+            };
         }
         catch (HttpRequestException)
         {
@@ -83,26 +79,6 @@ public class PaymentProcessorApi
             return PaymentResult.Timeout;
         }
     }
-
-    // public async Task<PaymentResult> PostIfNotExistAsync(PaymentApiRequest paymentApiRequest)
-    // {
-    //     try
-    //     {
-    //         var checkResponse = await _httpClient.GetAsync($"payments/{paymentApiRequest.CorrelationId}");
-    //         if (checkResponse.IsSuccessStatusCode)
-    //             return true;
-    //         var response = await _httpClient.PostAsJsonAsync("payments", paymentApiRequest);
-    //         return response.IsSuccessStatusCode;
-    //     }
-    //     catch (HttpRequestException)
-    //     {
-    //         return false;
-    //     }
-    //     catch (OperationCanceledException)
-    //     {
-    //         return false;
-    //     }
-    // }
 }
 
 public enum PaymentResult

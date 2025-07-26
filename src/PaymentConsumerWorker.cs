@@ -1,5 +1,4 @@
 ﻿using System.Threading.Channels;
-
 using StackExchange.Redis;
 
 namespace Rinha;
@@ -10,18 +9,33 @@ public class PaymentConsumerWorker : BackgroundService
     private readonly PaymentProcessorApi _defaultPaymentProcessor;
     private readonly PaymentProcessorApi _fallbackPaymentProcessor;
     private readonly IDatabase _db;
-    private readonly SemaphoreSlim _semaphore = new(20, 20);
+    private readonly SemaphoreSlim _semaphore;
 
-    public PaymentConsumerWorker(IConfiguration configuration, IDatabase db, Channel<PaymentApiRequest> queue, ILogger<PaymentConsumerWorker> logger)
+    public PaymentConsumerWorker(
+        IConfiguration configuration,
+        IDatabase db,
+        Channel<PaymentApiRequest> queue,
+        ILogger<PaymentConsumerWorker> logger
+    )
     {
         var defaultBaseUrl =
             configuration.GetValue<string>("PaymentProcessorDefault:BaseUrl")
-            ?? throw new InvalidOperationException("PaymentProcessorDefault:BaseUrl is not configured.");
+            ?? throw new InvalidOperationException(
+                "PaymentProcessorDefault:BaseUrl is not configured."
+            );
         _defaultPaymentProcessor = new PaymentProcessorApi(defaultBaseUrl);
         var fallbackBaseUrl =
             configuration.GetValue<string>("PaymentProcessorFallback:BaseUrl")
-            ?? throw new InvalidOperationException("PaymentProcessorFallback:BaseUrl is not configured.");
+            ?? throw new InvalidOperationException(
+                "PaymentProcessorFallback:BaseUrl is not configured."
+            );
         _fallbackPaymentProcessor = new PaymentProcessorApi(fallbackBaseUrl);
+        var maxConcurrentRequests =
+            configuration.GetValue<int>("MaxConcurrentRequests") > 0
+                ? configuration.GetValue<int>("MaxConcurrentRequests")
+                : 10;
+        _semaphore = new SemaphoreSlim(maxConcurrentRequests, maxConcurrentRequests);
+
         _db = db;
         _queue = queue;
     }

@@ -10,15 +10,10 @@ public record PaymentApiRequest(Guid CorrelationId, decimal Amount, DateTimeOffs
 
 public record PaymentApiServiceHealthResponse(bool Failing, int MinResponseTime);
 
-public record PaymentApiDetailsResponse(
-    Guid CorrelationId,
-    decimal Amount,
-    DateTimeOffset RequestedAt
-);
-
 public record PaymentEvent(
     Guid CorrelationId,
     decimal Amount,
     DateTimeOffset RequestedAt,
-    string Processor
+    string Processor,
+    DateTime Added
 );
