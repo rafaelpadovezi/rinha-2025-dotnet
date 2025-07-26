@@ -16,11 +16,11 @@ public static class DatabaseExtensions
                 paymentApiRequest.CorrelationId,
                 paymentApiRequest.Amount,
                 paymentApiRequest.RequestedAt,
-                processor,
-                "success"
-            )
+                processor
+            ),
+            AppJsonSerializerContext.Default.PaymentEvent
         );
-        var timestamp = paymentApiRequest.RequestedAt.ToUnixTimeSeconds();
+        var timestamp = paymentApiRequest.RequestedAt.ToUnixTimeMilliseconds();
         var processorKey = $"{processor}Payments";
         await db.SortedSetAddAsync(processorKey, json, timestamp);
     }
@@ -36,9 +36,9 @@ public static class DatabaseExtensions
                 paymentApiRequest.CorrelationId,
                 paymentApiRequest.Amount,
                 paymentApiRequest.RequestedAt,
-                processor,
-                "pending"
-            )
+                processor
+            ),
+            AppJsonSerializerContext.Default.PaymentEvent
         );
         var processorKey = processor switch
         {

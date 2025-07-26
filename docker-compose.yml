@@ -9,15 +9,14 @@
       ConnectionStrings__Redis: redis:6379
       PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
       PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
-      RunBackgroundService: "true"
     networks:
       - backend
       - payment-processor
     deploy:
       resources:
         limits:
-          cpus: "0.8"
-          memory: "150MB"
+          cpus: "0.5"
+          memory: "100MB"
   
   api2:
     <<: *api1
@@ -29,15 +28,33 @@
       ConnectionStrings__Redis: redis:6379
       PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
       PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
-      RunBackgroundService: "false"
     networks:
       - backend
       - payment-processor
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: "150MB"
+          cpus: "0.5"
+          memory: "100MB"
+          
+  worker:
+    build: ./src
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Redis: redis:6379
+      PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
+      PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
+      Worker: "true"
+    networks:
+      - backend
+      - payment-processor
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "0.75"
+#          memory: "150MB"
 
   redis:
     image: redis
@@ -54,8 +71,8 @@
     deploy:
       resources:
         limits:
-          cpus: "0.35"
-          memory: "30MB"
+          cpus: "0.4"
+          memory: "50MB"
   
   nginx:
     image: nginx

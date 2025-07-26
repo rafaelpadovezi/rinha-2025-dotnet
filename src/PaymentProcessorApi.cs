@@ -16,9 +16,9 @@ public class PaymentProcessorApi
     public PaymentProcessorApi(string baseUrl)
     {
         _httpClient.BaseAddress = new(baseUrl);
-        _httpClient.Timeout = TimeSpan.FromSeconds(6);
+        _httpClient.Timeout = TimeSpan.FromSeconds(10);
         _healthCheckHttpClient.BaseAddress = new(baseUrl);
-        _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(6);
+        _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(10);
     }
 
     private static readonly PaymentApiServiceHealthResponse UnhealthyResponse = new(true, 0);

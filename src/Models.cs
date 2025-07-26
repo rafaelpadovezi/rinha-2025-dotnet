@@ -20,6 +20,5 @@ public record PaymentEvent(
     Guid CorrelationId,
     decimal Amount,
     DateTimeOffset RequestedAt,
-    string Processor,
-    string Result
+    string Processor
 );
