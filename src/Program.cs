@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Mvc;
 using Rinha;
 using Scalar.AspNetCore;
@@ -10,21 +11,6 @@ var builder = WebApplication.CreateSlimBuilder(args);
 
 // Add services to the container.
 builder.Services.AddOpenApi();
-
-// builder.Services.AddHttpLogging(logging =>
-// {
-//     logging.CombineLogs = true;
-//     logging.RequestBodyLogLimit = 4096;
-//     logging.ResponseBodyLogLimit = 4096;
-//     logging.LoggingFields =
-//         HttpLoggingFields.Duration
-//         | HttpLoggingFields.RequestMethod
-//         | HttpLoggingFields.RequestPath
-//         | HttpLoggingFields.RequestQuery
-//         | HttpLoggingFields.ResponseStatusCode
-//         | HttpLoggingFields.RequestBody
-//         | HttpLoggingFields.ResponseBody;
-// });
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -45,11 +31,37 @@ builder.Services.AddHostedService<PaymentConsumerWorker>();
 
 var app = builder.Build();
 
+app.Use(
+    async (context, next) =>
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        await next.Invoke();
+
+        stopwatch.Stop();
+
+        if (stopwatch.ElapsedMilliseconds >= 5)
+        {
+            var method = context.Request.Method;
+            var path = context.Request.Path;
+            var queryString = context.Request.QueryString.ToString();
+            var fullPath = string.IsNullOrEmpty(queryString)
+                ? path.ToString()
+                : $"{path}{queryString}";
+
+            app.Logger.LogInformation(
+                "Request {Method} {Path} took {Duration}ms",
+                method,
+                fullPath,
+                stopwatch.ElapsedMilliseconds
+            );
+        }
+    }
+);
+
 // Configure the HTTP request pipeline.
 app.MapOpenApi();
 app.MapScalarApiReference();
-
-// app.UseHttpLogging();
 
 app.MapPost(
     "/purge-payments",
@@ -63,10 +75,10 @@ app.MapPost(
 
 app.MapGet(
     "/payments-summary",
-    async ([FromQuery] DateTimeOffset from, [FromQuery] DateTimeOffset to) =>
+    async ([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to) =>
     {
-        var startScore = from.ToUnixTimeMilliseconds();
-        var endScore = to.ToUnixTimeMilliseconds();
+        var startScore = from?.ToUnixTimeMilliseconds() ?? double.NegativeInfinity;
+        var endScore = to?.ToUnixTimeMilliseconds() ?? double.PositiveInfinity;
         var paymentsJson = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
         var defaultPaymentsCount = 0;
         var fallbackPaymentsCount = 0;

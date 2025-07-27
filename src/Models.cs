@@ -4,7 +4,7 @@ public record PaymentRequest(Guid CorrelationId, decimal Amount);
 
 public record PaymentSummaryResponse(Summary Default, Summary Fallback);
 
-public record Summary(int TotalRequests, decimal TotalAmount);
+public struct Summary(int TotalRequests, decimal TotalAmount);
 
 public record PaymentApiRequest(Guid CorrelationId, decimal Amount, DateTimeOffset RequestedAt);
 
@@ -14,6 +14,5 @@ public record PaymentEvent(
     Guid CorrelationId,
     decimal Amount,
     DateTimeOffset RequestedAt,
-    string Processor,
-    DateTime Added
+    string Processor
 );

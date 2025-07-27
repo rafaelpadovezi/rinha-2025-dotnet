@@ -16,8 +16,7 @@ public static class DatabaseExtensions
                 paymentApiRequest.CorrelationId,
                 paymentApiRequest.Amount,
                 paymentApiRequest.RequestedAt,
-                processor,
-                DateTime.UtcNow
+                processor
             ),
             AppJsonSerializerContext.Default.PaymentEvent
         );

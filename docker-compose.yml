@@ -9,14 +9,15 @@
       ConnectionStrings__Redis: redis:6379
       PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
       PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
+      MaxConcurrentRequests: 10
     networks:
       - backend
       - payment-processor
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "100MB"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "0.45"
+#          memory: "100MB"
   
   api2:
     <<: *api1
@@ -28,14 +29,31 @@
       ConnectionStrings__Redis: redis:6379
       PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
       PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
+      DOTNET_DiagnosticPorts: /diag/dotnet-monitor2.sock
+      MaxConcurrentRequests: 10
+    volumes:
+      - "./diag:/diag"
     networks:
       - backend
       - payment-processor
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "100MB"
+  monitor2:
+    image: mcr.microsoft.com/dotnet/monitor:9
+    environment:
+      DOTNETMONITOR_Storage__DefaultSharedPath: /diag
+      DOTNETMONITOR_Metrics__Endpoints: http://+:52325
+      DOTNETMONITOR_Urls: http://+:52323
+      DOTNETMONITOR_DiagnosticPort__ConnectionMode: listen
+      DOTNETMONITOR_DiagnosticPort__EndpointName: /diag/dotnet-monitor2.sock
+    depends_on:
+      - api2
+    command: [ "collect", "--no-auth" ]
+    volumes:
+      - "./diag:/diag"
+    ports:
+      - "52323:52323"
+      - "52325:52325"
+    networks:
+      - backend
 
   redis:
     image: redis
@@ -49,11 +67,11 @@
       start_period: 20s
     networks:
       - backend
-    deploy:
-      resources:
-        limits:
-          cpus: "0.4"
-          memory: "50MB"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "0.4"
+#          memory: "50MB"
   
   nginx:
     image: nginx
@@ -74,6 +92,7 @@
 
 networks:
   backend:
+    name: backend
     driver: bridge
   payment-processor:
     external: true

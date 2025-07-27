@@ -6,6 +6,7 @@ namespace Rinha;
 public class PaymentConsumerWorker : BackgroundService
 {
     private readonly Channel<PaymentApiRequest> _queue;
+    private readonly ILogger<PaymentConsumerWorker> _logger;
     private readonly PaymentProcessorApi _defaultPaymentProcessor;
     private readonly PaymentProcessorApi _fallbackPaymentProcessor;
     private readonly IDatabase _db;
@@ -38,13 +39,7 @@ public class PaymentConsumerWorker : BackgroundService
 
         _db = db;
         _queue = queue;
-    }
-
-    public async ValueTask EnqueueAsync(PaymentApiRequest payment)
-    {
-        ArgumentNullException.ThrowIfNull(payment);
-
-        await _queue.Writer.WriteAsync(payment);
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -92,7 +87,12 @@ public class PaymentConsumerWorker : BackgroundService
                 return;
             }
 
+            await Task.Delay(TimeSpan.FromMilliseconds(100), stoppingToken);
             await _queue.Writer.WriteAsync(payment, stoppingToken);
+            _logger.LogWarning(
+                "Payment failed for {CorrelationId}. Retrying...",
+                payment.CorrelationId
+            );
         }
         finally
         {
