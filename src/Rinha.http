@@ -1,6 +1,6 @@
-@Rinha_HostAddress = http://localhost:5076
+@Rinha_HostAddress = http://localhost:9999
 
-GET {{Rinha_HostAddress}}/weatherforecast/
+GET {{Rinha_HostAddress}}/payments-summary
 Accept: application/json
 
 ###

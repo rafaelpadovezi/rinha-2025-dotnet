@@ -31,33 +31,33 @@ builder.Services.AddHostedService<PaymentConsumerWorker>();
 
 var app = builder.Build();
 
-app.Use(
-    async (context, next) =>
-    {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-        await next.Invoke();
-
-        stopwatch.Stop();
-
-        if (stopwatch.ElapsedMilliseconds >= 5)
-        {
-            var method = context.Request.Method;
-            var path = context.Request.Path;
-            var queryString = context.Request.QueryString.ToString();
-            var fullPath = string.IsNullOrEmpty(queryString)
-                ? path.ToString()
-                : $"{path}{queryString}";
-
-            app.Logger.LogInformation(
-                "Request {Method} {Path} took {Duration}ms",
-                method,
-                fullPath,
-                stopwatch.ElapsedMilliseconds
-            );
-        }
-    }
-);
+// app.Use(
+//     async (context, next) =>
+//     {
+//         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+//
+//         await next.Invoke();
+//
+//         stopwatch.Stop();
+//
+//         if (stopwatch.ElapsedMilliseconds >= 5)
+//         {
+//             var method = context.Request.Method;
+//             var path = context.Request.Path;
+//             var queryString = context.Request.QueryString.ToString();
+//             var fullPath = string.IsNullOrEmpty(queryString)
+//                 ? path.ToString()
+//                 : $"{path}{queryString}";
+//
+//             app.Logger.LogInformation(
+//                 "Request {Method} {Path} took {Duration}ms",
+//                 method,
+//                 fullPath,
+//                 stopwatch.ElapsedMilliseconds
+//             );
+//         }
+//     }
+// );
 
 // Configure the HTTP request pipeline.
 app.MapOpenApi();
