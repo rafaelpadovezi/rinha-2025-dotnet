@@ -9,15 +9,14 @@
       ConnectionStrings__Redis: redis:6379
       PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
       PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
-      MaxConcurrentRequests: 10
     networks:
       - backend
       - payment-processor
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: "0.45"
-#          memory: "100MB"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.6"
+          memory: "100MB"
   
   api2:
     <<: *api1
@@ -30,7 +29,6 @@
       PaymentProcessorDefault__BaseUrl: http://payment-processor-default:8080
       PaymentProcessorFallback__BaseUrl: http://payment-processor-fallback:8080
       DOTNET_DiagnosticPorts: /diag/dotnet-monitor2.sock
-      MaxConcurrentRequests: 10
     volumes:
       - "./diag:/diag"
     networks:
@@ -59,6 +57,7 @@
     image: redis
     ports:
       - "6379:6379"
+    command: [ "redis-server", "--save", "", "--appendonly", "no" ]
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
@@ -67,11 +66,11 @@
       start_period: 20s
     networks:
       - backend
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: "0.4"
-#          memory: "50MB"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: "100MB"
   
   nginx:
     image: nginx
