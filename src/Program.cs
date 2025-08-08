@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
-using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Mvc;
 using Rinha;
 using Scalar.AspNetCore;
@@ -25,39 +24,11 @@ var db = redis.GetDatabase();
 builder.Services.AddSingleton(db);
 
 var options = new UnboundedChannelOptions { SingleWriter = false, SingleReader = false };
-var queue = Channel.CreateUnbounded<PaymentApiRequest>(options);
+var queue = Channel.CreateUnbounded<PaymentRequest>(options);
 builder.Services.AddSingleton(queue);
 builder.Services.AddHostedService<PaymentConsumerWorker>();
 
 var app = builder.Build();
-
-// app.Use(
-//     async (context, next) =>
-//     {
-//         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-//
-//         await next.Invoke();
-//
-//         stopwatch.Stop();
-//
-//         if (stopwatch.ElapsedMilliseconds >= 5)
-//         {
-//             var method = context.Request.Method;
-//             var path = context.Request.Path;
-//             var queryString = context.Request.QueryString.ToString();
-//             var fullPath = string.IsNullOrEmpty(queryString)
-//                 ? path.ToString()
-//                 : $"{path}{queryString}";
-//
-//             app.Logger.LogInformation(
-//                 "Request {Method} {Path} took {Duration}ms",
-//                 method,
-//                 fullPath,
-//                 stopwatch.ElapsedMilliseconds
-//             );
-//         }
-//     }
-// );
 
 // Configure the HTTP request pipeline.
 app.MapOpenApi();
@@ -91,12 +62,12 @@ app.MapGet(
                 json!,
                 AppJsonSerializerContext.Default.PaymentEvent
             );
-            if (payment.Processor == "default")
+            if (payment.Processor == Processor.Default)
             {
                 defaultPaymentsCount++;
                 defaultPaymentsAmount += payment.Amount;
             }
-            else if (payment.Processor == "fallback")
+            else if (payment.Processor == Processor.Fallback)
             {
                 fallbackPaymentsCount++;
                 fallbackPaymentsAmount += payment.Amount;
@@ -114,13 +85,9 @@ app.MapPost(
     "/payments",
     async ([FromBody] PaymentRequest request) =>
     {
-        var payment = new PaymentApiRequest(
-            request.CorrelationId,
-            request.Amount,
-            DateTimeOffset.UtcNow
-        );
+        request.RequestedAt = DateTimeOffset.UtcNow;
 
-        await queue.Writer.WriteAsync(payment);
+        await queue.Writer.WriteAsync(request);
 
         return Results.Ok();
     }
@@ -129,7 +96,6 @@ app.MapPost(
 app.Run();
 
 [JsonSerializable(typeof(PaymentEvent))]
-[JsonSerializable(typeof(PaymentApiRequest))]
 [JsonSerializable(typeof(PaymentRequest))]
 [JsonSerializable(typeof(PaymentSummaryResponse))]
 [JsonSerializable(typeof(Summary))]
