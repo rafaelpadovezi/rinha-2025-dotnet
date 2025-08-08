@@ -7,12 +7,12 @@ public static class DatabaseExtensions
 {
     public static async Task SavePaymentAsync(
         this IDatabase db,
-        PaymentApiRequest paymentApiRequest,
-        string processor
+        PaymentRequest paymentApiRequest,
+        Processor processor
     )
     {
         var json = JsonSerializer.Serialize(
-            new PaymentEvent(
+            new(
                 paymentApiRequest.CorrelationId,
                 paymentApiRequest.Amount,
                 paymentApiRequest.RequestedAt,

@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Polly;
+using Polly.Extensions.Http;
 
 namespace Rinha;
 
@@ -8,10 +10,14 @@ public class PaymentProcessorApi
     private readonly HttpClient _httpClient = new();
     private readonly HttpClient _healthCheckHttpClient = new();
 
-    private static readonly JsonSerializerOptions SerializeOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
+    private static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy() =>
+        HttpPolicyExtensions
+            .HandleTransientHttpError()
+            .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
+            .WaitAndRetryAsync(
+                3,
+                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 2
+            );
 
     public PaymentProcessorApi(string baseUrl)
     {
@@ -46,17 +52,20 @@ public class PaymentProcessorApi
     }
 
     public async Task<PaymentResult> PostAsync(
-        PaymentApiRequest paymentApiRequest,
+        PaymentRequest paymentApiRequest,
         CancellationToken cancellationToken = default
     )
     {
+        var retryPolicy = GetRetryPolicy();
         try
         {
-            var response = await _httpClient.PostAsJsonAsync(
-                "payments",
-                paymentApiRequest,
-                AppJsonSerializerContext.Default.PaymentApiRequest,
-                cancellationToken
+            var response = await retryPolicy.ExecuteAsync(() =>
+                _httpClient.PostAsJsonAsync(
+                    "payments",
+                    paymentApiRequest,
+                    AppJsonSerializerContext.Default.PaymentRequest,
+                    cancellationToken
+                )
             );
             if (response.IsSuccessStatusCode)
             {

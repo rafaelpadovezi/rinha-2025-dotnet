@@ -5,7 +5,7 @@ namespace Rinha;
 
 public class PaymentConsumerWorker : BackgroundService
 {
-    private readonly Channel<PaymentApiRequest> _queue;
+    private readonly Channel<PaymentRequest> _queue;
     private readonly ILogger<PaymentConsumerWorker> _logger;
     private readonly PaymentProcessorApi _defaultPaymentProcessor;
     private readonly PaymentProcessorApi _fallbackPaymentProcessor;
@@ -14,7 +14,7 @@ public class PaymentConsumerWorker : BackgroundService
     public PaymentConsumerWorker(
         IConfiguration configuration,
         IDatabase db,
-        Channel<PaymentApiRequest> queue,
+        Channel<PaymentRequest> queue,
         ILogger<PaymentConsumerWorker> logger
     )
     {
@@ -49,23 +49,25 @@ public class PaymentConsumerWorker : BackgroundService
         catch (OperationCanceledException) { }
     }
 
-    private async Task ProcessItemAsync(PaymentApiRequest payment, CancellationToken stoppingToken)
+    private async Task ProcessItemAsync(PaymentRequest payment, CancellationToken stoppingToken)
     {
         var result = await _defaultPaymentProcessor.PostAsync(payment, stoppingToken);
         if (result == PaymentResult.Success)
         {
-            await _db.SavePaymentAsync(payment, "default");
+            await _db.SavePaymentAsync(payment, Processor.Default);
             return;
         }
 
         result = await _fallbackPaymentProcessor.PostAsync(payment, stoppingToken);
         if (result == PaymentResult.Success)
         {
-            await _db.SavePaymentAsync(payment, "fallback");
+            await _db.SavePaymentAsync(payment, Processor.Fallback);
             return;
         }
 
-        await Task.Delay(TimeSpan.FromMilliseconds(100), stoppingToken);
+        _logger.LogWarning("Payment processing failed: {PaymentResult}", result);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(10), stoppingToken);
         await _queue.Writer.WriteAsync(payment, stoppingToken);
     }
 }
