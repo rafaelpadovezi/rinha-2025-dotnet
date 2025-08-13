@@ -16,7 +16,7 @@ public class PaymentProcessorApi
             .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
             .WaitAndRetryAsync(
                 3,
-                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 2
+                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 10
             );
 
     public PaymentProcessorApi(string baseUrl)
