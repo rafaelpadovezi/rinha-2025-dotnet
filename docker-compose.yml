@@ -1,7 +1,9 @@
 ﻿services:
   api1: &api1
     hostname: api1
-    build: ./src
+    build:
+      context: ./src
+      dockerfile: Dockerfile.local
     depends_on:
       redis:
         condition: service_healthy

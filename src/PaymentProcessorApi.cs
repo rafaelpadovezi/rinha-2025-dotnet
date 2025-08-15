@@ -7,20 +7,12 @@ namespace Rinha;
 
 public class PaymentProcessorApi
 {
-    private readonly HttpClient _httpClient = new();
     private readonly HttpClient _healthCheckHttpClient = new();
+    private readonly HttpClient _httpClient;
 
-    private static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy() =>
-        HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
-            .WaitAndRetryAsync(
-                3,
-                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 10
-            );
-
-    public PaymentProcessorApi(string baseUrl)
+    public PaymentProcessorApi(string baseUrl, IHttpClientFactory httpClientFactory)
     {
+        _httpClient = httpClientFactory.CreateClient("PaymentApiClient");
         _httpClient.BaseAddress = new(baseUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
         _healthCheckHttpClient.BaseAddress = new(baseUrl);
@@ -56,16 +48,13 @@ public class PaymentProcessorApi
         CancellationToken cancellationToken = default
     )
     {
-        var retryPolicy = GetRetryPolicy();
         try
         {
-            var response = await retryPolicy.ExecuteAsync(() =>
-                _httpClient.PostAsJsonAsync(
-                    "payments",
-                    paymentApiRequest,
-                    AppJsonSerializerContext.Default.PaymentRequest,
-                    cancellationToken
-                )
+            var response = await _httpClient.PostAsJsonAsync(
+                "payments",
+                paymentApiRequest,
+                AppJsonSerializerContext.Default.PaymentRequest,
+                cancellationToken
             );
             if (response.IsSuccessStatusCode)
             {

@@ -15,7 +15,8 @@ public class PaymentConsumerWorker : BackgroundService
         IConfiguration configuration,
         IDatabase db,
         Channel<PaymentRequest> queue,
-        ILogger<PaymentConsumerWorker> logger
+        ILogger<PaymentConsumerWorker> logger,
+        IHttpClientFactory httpClientFactory
     )
     {
         var defaultBaseUrl =
@@ -23,13 +24,13 @@ public class PaymentConsumerWorker : BackgroundService
             ?? throw new InvalidOperationException(
                 "PaymentProcessorDefault:BaseUrl is not configured."
             );
-        _defaultPaymentProcessor = new(defaultBaseUrl);
+        _defaultPaymentProcessor = new(defaultBaseUrl, httpClientFactory);
         var fallbackBaseUrl =
             configuration.GetValue<string>("PaymentProcessorFallback:BaseUrl")
             ?? throw new InvalidOperationException(
                 "PaymentProcessorFallback:BaseUrl is not configured."
             );
-        _fallbackPaymentProcessor = new(fallbackBaseUrl);
+        _fallbackPaymentProcessor = new(fallbackBaseUrl, httpClientFactory);
 
         _db = db;
         _queue = queue;
