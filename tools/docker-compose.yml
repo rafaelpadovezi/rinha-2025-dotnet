@@ -1,5 +1,6 @@
 ﻿services:
   prometheus:
+    user: root
     image: prom/prometheus
     ports:
       - "9090:9090"

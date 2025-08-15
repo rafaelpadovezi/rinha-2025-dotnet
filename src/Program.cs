@@ -3,14 +3,12 @@ using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Mvc;
 using Rinha;
-using Scalar.AspNetCore;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // Add services to the container.
-builder.Services.AddOpenApi();
-
+builder.Logging.ClearProviders();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
@@ -20,25 +18,25 @@ var redisConnectionString =
     builder.Configuration.GetConnectionString("Redis")
     ?? throw new InvalidOperationException("Redis:ConnectionString is not configured.");
 var redis = ConnectionMultiplexer.Connect(redisConnectionString);
-var db = redis.GetDatabase();
-builder.Services.AddSingleton(db);
+var redisDb = redis.GetDatabase();
+builder.Services.AddSingleton(redisDb);
 
 var options = new UnboundedChannelOptions { SingleWriter = false, SingleReader = false };
-var queue = Channel.CreateUnbounded<PaymentRequest>(options);
-builder.Services.AddSingleton(queue);
+var channel = Channel.CreateUnbounded<PaymentRequest>(options);
+builder.Services.AddSingleton(channel);
 builder.Services.AddHostedService<PaymentConsumerWorker>();
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-app.MapOpenApi();
-app.MapScalarApiReference();
 
 app.MapPost(
-    "/purge-payments",
-    async () =>
+    "/payments",
+    async ([FromBody] PaymentRequest request, Channel<PaymentRequest> queue) =>
     {
-        await db.KeyDeleteAsync("payments");
+        request.RequestedAt = DateTimeOffset.UtcNow;
+
+        await queue.Writer.WriteAsync(request);
 
         return Results.Ok();
     }
@@ -46,20 +44,21 @@ app.MapPost(
 
 app.MapGet(
     "/payments-summary",
-    async ([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to) =>
+    async ([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, IDatabase db) =>
     {
         var startScore = from?.ToUnixTimeMilliseconds() ?? double.NegativeInfinity;
         var endScore = to?.ToUnixTimeMilliseconds() ?? double.PositiveInfinity;
-        var paymentsJson = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
+        var payments = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
         var defaultPaymentsCount = 0;
         var fallbackPaymentsCount = 0;
         var defaultPaymentsAmount = 0m;
         var fallbackPaymentsAmount = 0m;
 
-        foreach (var json in paymentsJson)
+        foreach (var value in payments)
         {
-            var payment = JsonSerializer.Deserialize<PaymentEvent>(
-                json!,
+            var bytes = (byte[])value!;
+            var payment = JsonSerializer.Deserialize(
+                bytes.AsSpan(),
                 AppJsonSerializerContext.Default.PaymentEvent
             );
             if (payment.Processor == Processor.Default)
@@ -82,12 +81,10 @@ app.MapGet(
 );
 
 app.MapPost(
-    "/payments",
-    async ([FromBody] PaymentRequest request) =>
+    "/purge-payments",
+    async (IDatabase db) =>
     {
-        request.RequestedAt = DateTimeOffset.UtcNow;
-
-        await queue.Writer.WriteAsync(request);
+        await db.KeyDeleteAsync("payments");
 
         return Results.Ok();
     }

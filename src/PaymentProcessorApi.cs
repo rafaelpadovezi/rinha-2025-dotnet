@@ -1,30 +1,45 @@
 ﻿using System.Net;
-using System.Text.Json;
+using Microsoft.Extensions.Http.Resilience;
 using Polly;
-using Polly.Extensions.Http;
+using Polly.Timeout;
 
 namespace Rinha;
 
 public class PaymentProcessorApi
 {
-    private readonly HttpClient _httpClient = new();
+    private readonly HttpClient _httpClient;
     private readonly HttpClient _healthCheckHttpClient = new();
-
-    private static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy() =>
-        HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
-            .WaitAndRetryAsync(
-                3,
-                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 10
-            );
 
     public PaymentProcessorApi(string baseUrl)
     {
-        _httpClient.BaseAddress = new(baseUrl);
-        _httpClient.Timeout = TimeSpan.FromSeconds(10);
         _healthCheckHttpClient.BaseAddress = new(baseUrl);
         _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(10);
+
+        var socketHandler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            AutomaticDecompression = DecompressionMethods.None,
+            UseCookies = false,
+            AllowAutoRedirect = false,
+        };
+        var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(
+                new HttpRetryStrategyOptions
+                {
+                    BackoffType = DelayBackoffType.Exponential,
+                    MaxRetryAttempts = 3,
+                    Delay = TimeSpan.FromMilliseconds(250),
+                    UseJitter = false,
+                }
+            )
+            .Build();
+        var resilienceHandler = new ResilienceHandler(retryPipeline)
+        {
+            InnerHandler = socketHandler,
+        };
+        _httpClient = new(resilienceHandler);
+        _httpClient.BaseAddress = new(baseUrl + "/payments");
+        _httpClient.Timeout = TimeSpan.FromSeconds(10);
     }
 
     private static readonly PaymentApiServiceHealthResponse UnhealthyResponse = new(true, 0);
@@ -33,17 +48,16 @@ public class PaymentProcessorApi
     {
         try
         {
-            var response = await _healthCheckHttpClient.GetAsync("payments/service-health");
+            using var response = await _healthCheckHttpClient.GetAsync("payments/service-health");
             if (!response.IsSuccessStatusCode)
             {
                 return UnhealthyResponse;
             }
 
-            var content = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<PaymentApiServiceHealthResponse>(
-                    content,
-                    AppJsonSerializerContext.Default.PaymentApiServiceHealthResponse
-                ) ?? UnhealthyResponse;
+            var health = await response.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PaymentApiServiceHealthResponse
+            );
+            return health ?? UnhealthyResponse;
         }
         catch (Exception)
         {
@@ -56,16 +70,14 @@ public class PaymentProcessorApi
         CancellationToken cancellationToken = default
     )
     {
-        var retryPolicy = GetRetryPolicy();
         try
         {
-            var response = await retryPolicy.ExecuteAsync(() =>
-                _httpClient.PostAsJsonAsync(
-                    "payments",
-                    paymentApiRequest,
-                    AppJsonSerializerContext.Default.PaymentRequest,
-                    cancellationToken
-                )
+            string? path = null;
+            using var response = await _httpClient.PostAsJsonAsync(
+                path,
+                paymentApiRequest,
+                AppJsonSerializerContext.Default.PaymentRequest,
+                cancellationToken
             );
             if (response.IsSuccessStatusCode)
             {

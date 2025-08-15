@@ -1,26 +1,21 @@
 ﻿namespace Rinha;
 
-public record PaymentSummaryResponse(Summary Default, Summary Fallback);
+public sealed record PaymentSummaryResponse(Summary Default, Summary Fallback);
 
-public struct Summary(int totalRequests, decimal totalAmount)
+public readonly struct Summary(int totalRequests, decimal totalAmount)
 {
-    public int TotalRequests { get; set; } = totalRequests;
-    public decimal TotalAmount { get; set; } = totalAmount;
+    public int TotalRequests { get; } = totalRequests;
+    public decimal TotalAmount { get; } = totalAmount;
 }
 
-public record PaymentRequest(Guid CorrelationId, decimal Amount)
+public sealed record PaymentRequest(Guid CorrelationId, decimal Amount)
 {
     public DateTimeOffset RequestedAt { get; set; }
 }
 
-public record PaymentApiServiceHealthResponse(bool Failing, int MinResponseTime);
+public sealed record PaymentApiServiceHealthResponse(bool Failing, int MinResponseTime);
 
-public record PaymentEvent(
-    Guid CorrelationId,
-    decimal Amount,
-    DateTimeOffset RequestedAt,
-    Processor Processor
-);
+public sealed record PaymentEvent(Guid CorrelationId, decimal Amount, Processor Processor);
 
 public enum Processor
 {

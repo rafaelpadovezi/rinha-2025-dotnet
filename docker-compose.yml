@@ -21,6 +21,7 @@
   api2:
     <<: *api1
     hostname: api2
+    user: root
     depends_on:
       redis:
         condition: service_healthy
@@ -35,6 +36,7 @@
       - backend
       - payment-processor
   monitor2:
+    user: root
     image: mcr.microsoft.com/dotnet/monitor:9
     environment:
       DOTNETMONITOR_Storage__DefaultSharedPath: /diag
