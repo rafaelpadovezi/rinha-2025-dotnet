@@ -10,10 +10,9 @@ public static class DatabaseExtensions
     public static Task SavePaymentAsync(
         this IDatabase db,
         PaymentRequest paymentApiRequest,
-        ref Processor processor
+        Processor processor
     )
     {
-        // Serialize directly to UTF-8 bytes to avoid allocating intermediate strings
         var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(
             new(paymentApiRequest.CorrelationId, paymentApiRequest.Amount, processor),
             AppJsonSerializerContext.Default.PaymentEvent

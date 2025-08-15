@@ -8,6 +8,7 @@ using StackExchange.Redis;
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // Add services to the container.
+builder.Logging.ClearProviders();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
@@ -30,10 +31,12 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 
 app.MapPost(
-    "/purge-payments",
-    async () =>
+    "/payments",
+    async ([FromBody] PaymentRequest request, Channel<PaymentRequest> queue) =>
     {
-        await redisDb.KeyDeleteAsync("payments");
+        request.RequestedAt = DateTimeOffset.UtcNow;
+
+        await queue.Writer.WriteAsync(request);
 
         return Results.Ok();
     }
@@ -45,16 +48,15 @@ app.MapGet(
     {
         var startScore = from?.ToUnixTimeMilliseconds() ?? double.NegativeInfinity;
         var endScore = to?.ToUnixTimeMilliseconds() ?? double.PositiveInfinity;
-        var paymentsJson = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
+        var payments = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
         var defaultPaymentsCount = 0;
         var fallbackPaymentsCount = 0;
         var defaultPaymentsAmount = 0m;
         var fallbackPaymentsAmount = 0m;
 
-        foreach (var json in paymentsJson)
+        foreach (var value in payments)
         {
-            // Deserialize from bytes to avoid intermediate string allocations
-            var bytes = (byte[])json!;
+            var bytes = (byte[])value!;
             var payment = JsonSerializer.Deserialize(
                 bytes.AsSpan(),
                 AppJsonSerializerContext.Default.PaymentEvent
@@ -79,12 +81,10 @@ app.MapGet(
 );
 
 app.MapPost(
-    "/payments",
-    async ([FromBody] PaymentRequest request, Channel<PaymentRequest> queue) =>
+    "/purge-payments",
+    async (IDatabase db) =>
     {
-        request.RequestedAt = DateTimeOffset.UtcNow;
-
-        await queue.Writer.WriteAsync(request);
+        await db.KeyDeleteAsync("payments");
 
         return Results.Ok();
     }

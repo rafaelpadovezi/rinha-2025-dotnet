@@ -6,6 +6,7 @@ namespace Rinha;
 public class PaymentConsumerWorker : BackgroundService
 {
     private readonly Channel<PaymentRequest> _queue;
+    private readonly ILogger _logger;
     private readonly PaymentProcessorApi _defaultPaymentProcessor;
     private readonly PaymentProcessorApi _fallbackPaymentProcessor;
     private readonly IDatabase _db;
@@ -13,7 +14,8 @@ public class PaymentConsumerWorker : BackgroundService
     public PaymentConsumerWorker(
         IConfiguration configuration,
         IDatabase db,
-        Channel<PaymentRequest> queue
+        Channel<PaymentRequest> queue,
+        ILogger<PaymentConsumerWorker> logger
     )
     {
         var defaultBaseUrl =
@@ -31,6 +33,7 @@ public class PaymentConsumerWorker : BackgroundService
 
         _db = db;
         _queue = queue;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -61,8 +64,14 @@ public class PaymentConsumerWorker : BackgroundService
             await _db.SavePaymentAsync(payment, Processor.Fallback);
             return;
         }
+        _logger.LogWarning(
+            "Payment {CorrelationId} failed with result {Result}.",
+            payment.CorrelationId,
+            result
+        );
+        ;
 
-        await Task.Delay(TimeSpan.FromMilliseconds(10), stoppingToken);
+        await Task.Delay(TimeSpan.FromMilliseconds(25), stoppingToken);
         await _queue.Writer.WriteAsync(payment, stoppingToken);
     }
 }
