@@ -5,23 +5,20 @@ namespace Rinha;
 
 public static class DatabaseExtensions
 {
-    public static async Task SavePaymentAsync(
+    private const string SortedSetKey = "payments";
+
+    public static Task SavePaymentAsync(
         this IDatabase db,
         PaymentRequest paymentApiRequest,
-        Processor processor
+        ref Processor processor
     )
     {
-        var json = JsonSerializer.Serialize(
-            new(
-                paymentApiRequest.CorrelationId,
-                paymentApiRequest.Amount,
-                paymentApiRequest.RequestedAt,
-                processor
-            ),
+        // Serialize directly to UTF-8 bytes to avoid allocating intermediate strings
+        var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(
+            new(paymentApiRequest.CorrelationId, paymentApiRequest.Amount, processor),
             AppJsonSerializerContext.Default.PaymentEvent
         );
         var timestamp = paymentApiRequest.RequestedAt.ToUnixTimeMilliseconds();
-        const string processorKey = "payments";
-        await db.SortedSetAddAsync(processorKey, json, timestamp);
+        return db.SortedSetAddAsync(SortedSetKey, jsonBytes, timestamp);
     }
 }

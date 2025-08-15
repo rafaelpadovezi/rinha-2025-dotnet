@@ -1,27 +1,31 @@
 ﻿using System.Net;
-using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Polly;
 using Polly.Extensions.Http;
+using Polly.Retry;
 
 namespace Rinha;
 
 public class PaymentProcessorApi
 {
-    private readonly HttpClient _httpClient = new();
+    private static readonly SocketsHttpHandler SharedHandler = new()
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        AutomaticDecompression = DecompressionMethods.None,
+        UseCookies = false,
+        AllowAutoRedirect = false,
+    };
+    private readonly HttpClient _httpClient = new(SharedHandler);
     private readonly HttpClient _healthCheckHttpClient = new();
 
-    private static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy() =>
-        HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
-            .WaitAndRetryAsync(
-                3,
-                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 10
-            );
+    private static readonly AsyncRetryPolicy<HttpResponseMessage> RetryPolicy = HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .OrResult(msg => msg.StatusCode == HttpStatusCode.NotFound)
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)) / 10);
 
     public PaymentProcessorApi(string baseUrl)
     {
-        _httpClient.BaseAddress = new(baseUrl);
+        _httpClient.BaseAddress = new(baseUrl + "/payments");
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
         _healthCheckHttpClient.BaseAddress = new(baseUrl);
         _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(10);
@@ -33,17 +37,19 @@ public class PaymentProcessorApi
     {
         try
         {
-            var response = await _healthCheckHttpClient.GetAsync("payments/service-health");
+            using var response = await _healthCheckHttpClient.GetAsync(
+                "payments/service-health",
+                HttpCompletionOption.ResponseHeadersRead
+            );
             if (!response.IsSuccessStatusCode)
             {
                 return UnhealthyResponse;
             }
 
-            var content = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<PaymentApiServiceHealthResponse>(
-                    content,
-                    AppJsonSerializerContext.Default.PaymentApiServiceHealthResponse
-                ) ?? UnhealthyResponse;
+            var health = await response.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PaymentApiServiceHealthResponse
+            );
+            return health ?? UnhealthyResponse;
         }
         catch (Exception)
         {
@@ -56,16 +62,39 @@ public class PaymentProcessorApi
         CancellationToken cancellationToken = default
     )
     {
-        var retryPolicy = GetRetryPolicy();
         try
         {
-            var response = await retryPolicy.ExecuteAsync(() =>
-                _httpClient.PostAsJsonAsync(
-                    "payments",
-                    paymentApiRequest,
-                    AppJsonSerializerContext.Default.PaymentRequest,
-                    cancellationToken
-                )
+            // Use a static lambda with Polly Context to avoid capturing outer variables.
+            static async Task<HttpResponseMessage> PostWithContextAsync(
+                Context ctx,
+                CancellationToken ct
+            )
+            {
+                var client = (HttpClient)ctx["client"]!;
+                var payment = (PaymentRequest)ctx["payment"]!;
+                var typeInfo = (JsonTypeInfo<PaymentRequest>)ctx["typeInfo"]!;
+
+                using var request = new HttpRequestMessage();
+                request.Method = HttpMethod.Post;
+                request.Content = JsonContent.Create(payment, typeInfo);
+                return await client.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    ct
+                );
+            }
+
+            var ctx = new Context
+            {
+                ["client"] = _httpClient,
+                ["payment"] = paymentApiRequest,
+                ["typeInfo"] = AppJsonSerializerContext.Default.PaymentRequest,
+            };
+
+            var response = await RetryPolicy.ExecuteAsync(
+                PostWithContextAsync,
+                ctx,
+                cancellationToken
             );
             if (response.IsSuccessStatusCode)
             {
