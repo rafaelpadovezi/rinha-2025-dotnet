@@ -1,7 +1,7 @@
 ﻿using System.Net;
+
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
-using Polly.Timeout;
 
 namespace Rinha;
 
@@ -10,7 +10,7 @@ public class PaymentProcessorApi
     private readonly HttpClient _httpClient;
     private readonly HttpClient _healthCheckHttpClient = new();
 
-    public PaymentProcessorApi(string baseUrl)
+    public PaymentProcessorApi(string baseUrl, bool retry)
     {
         _healthCheckHttpClient.BaseAddress = new(baseUrl);
         _healthCheckHttpClient.Timeout = TimeSpan.FromSeconds(10);
@@ -21,23 +21,32 @@ public class PaymentProcessorApi
             AutomaticDecompression = DecompressionMethods.None,
             UseCookies = false,
             AllowAutoRedirect = false,
+            UseProxy = false
         };
-        var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-            .AddRetry(
-                new HttpRetryStrategyOptions
-                {
-                    BackoffType = DelayBackoffType.Exponential,
-                    MaxRetryAttempts = 3,
-                    Delay = TimeSpan.FromMilliseconds(250),
-                    UseJitter = false,
-                }
-            )
-            .Build();
-        var resilienceHandler = new ResilienceHandler(retryPipeline)
+        if (retry)
         {
-            InnerHandler = socketHandler,
-        };
-        _httpClient = new(resilienceHandler);
+            var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+                .AddRetry(
+                    new HttpRetryStrategyOptions
+                    {
+                        BackoffType = DelayBackoffType.Exponential,
+                        MaxRetryAttempts = 3,
+                        Delay = TimeSpan.FromMilliseconds(250),
+                        UseJitter = false,
+                    }
+                )
+                .Build();
+            var resilienceHandler = new ResilienceHandler(retryPipeline)
+            {
+                InnerHandler = socketHandler,
+            };
+            _httpClient = new(resilienceHandler);
+        }
+        else
+        {
+            _httpClient = new(socketHandler);
+        }
+
         _httpClient.BaseAddress = new(baseUrl + "/payments");
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
     }

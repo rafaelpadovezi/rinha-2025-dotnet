@@ -23,13 +23,13 @@ public class PaymentConsumerWorker : BackgroundService
             ?? throw new InvalidOperationException(
                 "PaymentProcessorDefault:BaseUrl is not configured."
             );
-        _defaultPaymentProcessor = new(defaultBaseUrl);
+        _defaultPaymentProcessor = new(defaultBaseUrl, true);
         var fallbackBaseUrl =
             configuration.GetValue<string>("PaymentProcessorFallback:BaseUrl")
             ?? throw new InvalidOperationException(
                 "PaymentProcessorFallback:BaseUrl is not configured."
             );
-        _fallbackPaymentProcessor = new(fallbackBaseUrl);
+        _fallbackPaymentProcessor = new(fallbackBaseUrl, false);
 
         _db = db;
         _queue = queue;
@@ -69,9 +69,8 @@ public class PaymentConsumerWorker : BackgroundService
             payment.CorrelationId,
             result
         );
-        ;
 
-        await Task.Delay(TimeSpan.FromMilliseconds(25), stoppingToken);
+        await Task.Delay(TimeSpan.FromMilliseconds(100), stoppingToken);
         await _queue.Writer.WriteAsync(payment, stoppingToken);
     }
 }

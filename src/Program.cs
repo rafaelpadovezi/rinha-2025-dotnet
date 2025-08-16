@@ -21,7 +21,8 @@ var redis = ConnectionMultiplexer.Connect(redisConnectionString);
 var redisDb = redis.GetDatabase();
 builder.Services.AddSingleton(redisDb);
 
-var options = new UnboundedChannelOptions { SingleWriter = false, SingleReader = false };
+var options =
+    new UnboundedChannelOptions { SingleWriter = false, SingleReader = false, AllowSynchronousContinuations = true };
 var channel = Channel.CreateUnbounded<PaymentRequest>(options);
 builder.Services.AddSingleton(channel);
 builder.Services.AddHostedService<PaymentConsumerWorker>();
@@ -29,7 +30,6 @@ builder.Services.AddHostedService<PaymentConsumerWorker>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-
 app.MapPost(
     "/payments",
     async ([FromBody] PaymentRequest request, Channel<PaymentRequest> queue) =>

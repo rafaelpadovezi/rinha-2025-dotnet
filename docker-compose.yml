@@ -15,8 +15,8 @@
     deploy:
       resources:
         limits:
-          cpus: "0.6"
-          memory: "100MB"
+          cpus: "0.55"
+          memory: "135MB"
   
   api2:
     <<: *api1
@@ -44,6 +44,9 @@
       DOTNETMONITOR_Urls: http://+:52323
       DOTNETMONITOR_DiagnosticPort__ConnectionMode: listen
       DOTNETMONITOR_DiagnosticPort__EndpointName: /diag/dotnet-monitor2.sock
+      Logging__LogLevel__Default: Warning
+      Logging__LogLevel__Microsoft.Diagnostics: Warning
+      Logging__LogLevel__Microsoft.Hosting.Lifetime: Warning
     depends_on:
       - api2
     command: [ "collect", "--no-auth" ]
@@ -71,8 +74,8 @@
     deploy:
       resources:
         limits:
-          cpus: "0.2"
-          memory: "100MB"
+          cpus: "0.20"
+          memory: "60MB"
   
   nginx:
     image: nginx
@@ -88,7 +91,7 @@
     deploy:
       resources:
         limits:
-          cpus: "0.10"
+          cpus: "0.20"
           memory: "20MB"
 
 networks:
