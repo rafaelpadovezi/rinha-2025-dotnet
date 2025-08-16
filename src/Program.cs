@@ -8,7 +8,7 @@ using StackExchange.Redis;
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // Add services to the container.
-builder.Logging.ClearProviders();
+// builder.Logging.ClearProviders();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
@@ -34,8 +34,6 @@ app.MapPost(
     "/payments",
     async ([FromBody] PaymentRequest request, Channel<PaymentRequest> queue) =>
     {
-        request.RequestedAt = DateTimeOffset.UtcNow;
-
         await queue.Writer.WriteAsync(request);
 
         return Results.Ok();
@@ -48,29 +46,47 @@ app.MapGet(
     {
         var startScore = from?.ToUnixTimeMilliseconds() ?? double.NegativeInfinity;
         var endScore = to?.ToUnixTimeMilliseconds() ?? double.PositiveInfinity;
-        var payments = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
+        var batch = db.CreateBatch();
+        var paymentsDefaultTask = batch.SortedSetRangeByScoreAsync(
+            "paymentsDefault",
+            startScore,
+            endScore
+        );
+        var paymentsFallbackTask = batch.SortedSetRangeByScoreAsync(
+            "paymentsFallback",
+            startScore,
+            endScore
+        );
+        batch.Execute();
+
+        var paymentsDefault = await paymentsDefaultTask;
+        var paymentsFallback = await paymentsFallbackTask;
+
         var defaultPaymentsCount = 0;
         var fallbackPaymentsCount = 0;
         var defaultPaymentsAmount = 0m;
         var fallbackPaymentsAmount = 0m;
 
-        foreach (var value in payments)
+        foreach (var value in paymentsDefault)
         {
             var bytes = (byte[])value!;
             var payment = JsonSerializer.Deserialize(
                 bytes.AsSpan(),
-                AppJsonSerializerContext.Default.PaymentEvent
+                AppJsonSerializerContext.Default.PaymentDbEvent
             );
-            if (payment.Processor == Processor.Default)
-            {
-                defaultPaymentsCount++;
-                defaultPaymentsAmount += payment.Amount;
-            }
-            else if (payment.Processor == Processor.Fallback)
-            {
-                fallbackPaymentsCount++;
-                fallbackPaymentsAmount += payment.Amount;
-            }
+            defaultPaymentsCount++;
+            defaultPaymentsAmount += payment.Amount;
+        }
+
+        foreach (var value in paymentsFallback)
+        {
+            var bytes = (byte[])value!;
+            var payment = JsonSerializer.Deserialize(
+                bytes.AsSpan(),
+                AppJsonSerializerContext.Default.PaymentDbEvent
+            );
+            fallbackPaymentsCount++;
+            fallbackPaymentsAmount += payment.Amount;
         }
         var defaultSummary = new Summary(defaultPaymentsCount, defaultPaymentsAmount);
         var fallbackSummary = new Summary(fallbackPaymentsCount, fallbackPaymentsAmount);
@@ -85,6 +101,8 @@ app.MapPost(
     async (IDatabase db) =>
     {
         await db.KeyDeleteAsync("payments");
+        await db.KeyDeleteAsync("paymentsDefault");
+        await db.KeyDeleteAsync("paymentsFallback");
 
         return Results.Ok();
     }
@@ -93,6 +111,7 @@ app.MapPost(
 app.Run();
 
 [JsonSerializable(typeof(PaymentEvent))]
+[JsonSerializable(typeof(PaymentDbEvent))]
 [JsonSerializable(typeof(PaymentRequest))]
 [JsonSerializable(typeof(PaymentSummaryResponse))]
 [JsonSerializable(typeof(Summary))]

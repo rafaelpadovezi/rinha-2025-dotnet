@@ -1,4 +1,7 @@
-﻿using System.Threading.Channels;
+﻿using System.Buffers;
+using System.Text.Json;
+using System.Text.Unicode;
+using System.Threading.Channels;
 using StackExchange.Redis;
 
 namespace Rinha;
@@ -40,38 +43,39 @@ public class PaymentConsumerWorker : BackgroundService
     {
         try
         {
-            while (stoppingToken.IsCancellationRequested == false)
+            while (await _queue.Reader.WaitToReadAsync(stoppingToken))
             {
                 var payment = await _queue.Reader.ReadAsync(stoppingToken);
-                await ProcessItemAsync(payment, stoppingToken);
+                payment.RequestedAt = DateTime.UtcNow;
+                var timestamp = payment.RequestedAt.ToUnixTimeMilliseconds();
+
+                var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(
+                    payment,
+                    AppJsonSerializerContext.Default.PaymentRequest
+                );
+                var result = await _defaultPaymentProcessor.PostAsync(jsonBytes, stoppingToken);
+                if (result == PaymentResult.Success)
+                {
+                    await _db.SortedSetAddAsync("paymentsDefault", jsonBytes, timestamp);
+                    continue;
+                }
+
+                result = await _fallbackPaymentProcessor.PostAsync(jsonBytes, stoppingToken);
+                if (result == PaymentResult.Success)
+                {
+                    await _db.SortedSetAddAsync("paymentsFallback", jsonBytes, timestamp);
+                    continue;
+                }
+                _logger.LogWarning(
+                    "Payment {CorrelationId} failed with result {Result}.",
+                    payment.CorrelationId,
+                    result
+                );
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100), stoppingToken);
+                await _queue.Writer.WriteAsync(payment, stoppingToken);
             }
         }
         catch (OperationCanceledException) { }
-    }
-
-    private async Task ProcessItemAsync(PaymentRequest payment, CancellationToken stoppingToken)
-    {
-        var result = await _defaultPaymentProcessor.PostAsync(payment, stoppingToken);
-        if (result == PaymentResult.Success)
-        {
-            await _db.SavePaymentAsync(payment, Processor.Default);
-            return;
-        }
-
-        result = await _fallbackPaymentProcessor.PostAsync(payment, stoppingToken);
-        if (result == PaymentResult.Success)
-        {
-            await _db.SavePaymentAsync(payment, Processor.Fallback);
-            return;
-        }
-        _logger.LogWarning(
-            "Payment {CorrelationId} failed with result {Result}.",
-            payment.CorrelationId,
-            result
-        );
-        ;
-
-        await Task.Delay(TimeSpan.FromMilliseconds(25), stoppingToken);
-        await _queue.Writer.WriteAsync(payment, stoppingToken);
     }
 }

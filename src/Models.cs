@@ -17,6 +17,11 @@ public sealed record PaymentApiServiceHealthResponse(bool Failing, int MinRespon
 
 public sealed record PaymentEvent(Guid CorrelationId, decimal Amount, Processor Processor);
 
+public readonly struct PaymentDbEvent
+{
+    public decimal Amount { get; init; }
+}
+
 public enum Processor
 {
     Default,

@@ -1,7 +1,9 @@
 ﻿services:
   api1: &api1
     hostname: api1
-    build: ./src
+    build:
+      context: ./src
+      dockerfile: Dockerfile
     depends_on:
       redis:
         condition: service_healthy
@@ -15,8 +17,8 @@
     deploy:
       resources:
         limits:
-          cpus: "0.6"
-          memory: "100MB"
+          cpus: "0.55"
+          memory: "110MB"
   
   api2:
     <<: *api1
@@ -71,7 +73,7 @@
     deploy:
       resources:
         limits:
-          cpus: "0.2"
+          cpus: "0.3"
           memory: "100MB"
   
   nginx:
@@ -89,7 +91,7 @@
       resources:
         limits:
           cpus: "0.10"
-          memory: "20MB"
+          memory: "30MB"
 
 networks:
   backend:

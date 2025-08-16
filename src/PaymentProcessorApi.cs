@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Headers;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 using Polly.Timeout;
@@ -66,19 +67,19 @@ public class PaymentProcessorApi
     }
 
     public async Task<PaymentResult> PostAsync(
-        PaymentRequest paymentApiRequest,
+        byte[] paymentApiRequest,
         CancellationToken cancellationToken = default
     )
     {
         try
         {
             string? path = null;
-            using var response = await _httpClient.PostAsJsonAsync(
-                path,
-                paymentApiRequest,
-                AppJsonSerializerContext.Default.PaymentRequest,
-                cancellationToken
+            using var httpRequestMessage = new HttpRequestMessage(HttpMethod.Post, path);
+            httpRequestMessage.Content = new ByteArrayContent(paymentApiRequest);
+            httpRequestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(
+                "application/json"
             );
+            using var response = await _httpClient.SendAsync(httpRequestMessage, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
                 return PaymentResult.Success;
