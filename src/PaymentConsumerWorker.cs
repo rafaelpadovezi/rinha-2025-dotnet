@@ -1,19 +1,20 @@
 ﻿using System.Threading.Channels;
-using StackExchange.Redis;
+
+using Npgsql;
 
 namespace Rinha;
 
 public class PaymentConsumerWorker : BackgroundService
 {
+    private readonly NpgsqlDataSource _db;
     private readonly Channel<PaymentRequest> _queue;
     private readonly ILogger _logger;
     private readonly PaymentProcessorApi _defaultPaymentProcessor;
     private readonly PaymentProcessorApi _fallbackPaymentProcessor;
-    private readonly IDatabase _db;
 
     public PaymentConsumerWorker(
         IConfiguration configuration,
-        IDatabase db,
+        NpgsqlDataSource db,
         Channel<PaymentRequest> queue,
         ILogger<PaymentConsumerWorker> logger
     )
