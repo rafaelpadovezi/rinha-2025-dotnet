@@ -1,23 +1,24 @@
-﻿using System.Text.Json;
-using StackExchange.Redis;
+﻿using Npgsql;
+
+using NpgsqlTypes;
 
 namespace Rinha;
 
 public static class DatabaseExtensions
 {
-    private const string SortedSetKey = "payments";
-
-    public static Task SavePaymentAsync(
-        this IDatabase db,
+    public static async Task SavePaymentAsync(
+        this NpgsqlDataSource db,
         PaymentRequest paymentApiRequest,
         Processor processor
     )
     {
-        var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(
-            new(paymentApiRequest.CorrelationId, paymentApiRequest.Amount, processor),
-            AppJsonSerializerContext.Default.PaymentEvent
-        );
-        var timestamp = paymentApiRequest.RequestedAt.ToUnixTimeMilliseconds();
-        return db.SortedSetAddAsync(SortedSetKey, jsonBytes, timestamp);
+        await using var command = db.CreateCommand(
+            "INSERT INTO payments (correlation_id, amount, requested_at, processor) VALUES (@correlation_id, @amount, @requested_at, @processor)");
+        command.Parameters.AddWithValue("correlation_id", NpgsqlDbType.Uuid, paymentApiRequest.CorrelationId);
+        command.Parameters.AddWithValue("amount", NpgsqlDbType.Numeric, paymentApiRequest.Amount);
+        command.Parameters.AddWithValue("requested_at", NpgsqlDbType.TimestampTz, paymentApiRequest.RequestedAt);
+        command.Parameters.AddWithValue("processor", NpgsqlDbType.Integer, (int)processor);
+
+        await command.ExecuteNonQueryAsync();
     }
 }

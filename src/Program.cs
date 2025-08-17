@@ -2,24 +2,28 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
+
+using NpgsqlTypes;
+
 using Rinha;
-using StackExchange.Redis;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // Add services to the container.
-builder.Logging.ClearProviders();
+// builder.Logging.ClearProviders();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
 });
 
-var redisConnectionString =
-    builder.Configuration.GetConnectionString("Redis")
-    ?? throw new InvalidOperationException("Redis:ConnectionString is not configured.");
-var redis = ConnectionMultiplexer.Connect(redisConnectionString);
-var redisDb = redis.GetDatabase();
-builder.Services.AddSingleton(redisDb);
+builder.WebHost.ConfigureKestrel((_, serverOptions) =>
+    {
+        serverOptions.AddServerHeader = false;
+    });
+var dataSourceBuilder = new NpgsqlDataSourceBuilder(builder.Configuration.GetConnectionString("Postgres"));
+await using var dataSource = dataSourceBuilder.Build();
+builder.Services.AddSingleton(dataSource);
 
 var options =
     new UnboundedChannelOptions { SingleWriter = false, SingleReader = false, AllowSynchronousContinuations = true };
@@ -44,34 +48,53 @@ app.MapPost(
 
 app.MapGet(
     "/payments-summary",
-    async ([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, IDatabase db) =>
+    async ([FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, NpgsqlDataSource db) =>
     {
         var startScore = from?.ToUnixTimeMilliseconds() ?? double.NegativeInfinity;
         var endScore = to?.ToUnixTimeMilliseconds() ?? double.PositiveInfinity;
-        var payments = await db.SortedSetRangeByScoreAsync("payments", startScore, endScore);
         var defaultPaymentsCount = 0;
         var fallbackPaymentsCount = 0;
         var defaultPaymentsAmount = 0m;
         var fallbackPaymentsAmount = 0m;
 
-        foreach (var value in payments)
+        // get from db the default and fallback payments summary
+        await using (var conn = await db.OpenConnectionAsync())
         {
-            var bytes = (byte[])value!;
-            var payment = JsonSerializer.Deserialize(
-                bytes.AsSpan(),
-                AppJsonSerializerContext.Default.PaymentEvent
-            );
-            if (payment.Processor == Processor.Default)
+            // Default payments
+            await using (var cmd = new NpgsqlCommand(
+                "SELECT COUNT(*), SUM(amount) FROM payments WHERE processor = 0 AND requested_at >= @start AND requested_at <= @end",
+                conn))
             {
-                defaultPaymentsCount++;
-                defaultPaymentsAmount += payment.Amount;
+                cmd.Parameters.AddWithValue("start", NpgsqlDbType.TimestampTz, from);
+                cmd.Parameters.AddWithValue("end", NpgsqlDbType.TimestampTz, to);
+                await using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        defaultPaymentsCount = reader.GetInt32(0);
+                        defaultPaymentsAmount = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
+                    }
+                }
             }
-            else if (payment.Processor == Processor.Fallback)
+
+            // Fallback payments
+            await using (var cmd = new NpgsqlCommand(
+                "SELECT COUNT(*), SUM(amount) FROM payments WHERE processor = 1 AND requested_at >= @start AND requested_at <= @end",
+                conn))
             {
-                fallbackPaymentsCount++;
-                fallbackPaymentsAmount += payment.Amount;
+                cmd.Parameters.AddWithValue("start", from);
+                cmd.Parameters.AddWithValue("end", to);
+                await using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        fallbackPaymentsCount = reader.GetInt32(0);
+                        fallbackPaymentsAmount = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
+                    }
+                }
             }
         }
+
         var defaultSummary = new Summary(defaultPaymentsCount, defaultPaymentsAmount);
         var fallbackSummary = new Summary(fallbackPaymentsCount, fallbackPaymentsAmount);
         var result = new PaymentSummaryResponse(defaultSummary, fallbackSummary);
@@ -82,9 +105,13 @@ app.MapGet(
 
 app.MapPost(
     "/purge-payments",
-    async (IDatabase db) =>
+    async (NpgsqlDataSource db) =>
     {
-        await db.KeyDeleteAsync("payments");
+        await using var conn = await db.OpenConnectionAsync();
+        await using (var cmd = new NpgsqlCommand("TRUNCATE TABLE payments", conn))
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
 
         return Results.Ok();
     }
